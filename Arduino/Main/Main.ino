@@ -1,7 +1,10 @@
 // Constant fields
 #define PH_SENSOR_PIN A0
 #define EC_SENSOR_PIN A1
+#define EC_PUMP_PIN 3
+#define PH_PUMP_PIN 5
 #define PUMP_PIN 7
+#define LIGHT_PIN 8
 #define PUMP_ON_TIME 30000 //ms
 #define PUMP_OFF_TIME 86400000 //ms
 #define READ_SERIAL 1000 //ms
@@ -18,6 +21,7 @@ static unsigned long printTime;
 static unsigned long pumpOnTime;
 static unsigned long pumpOffTime;
 static unsigned long serialReadTime;
+static bool userDefinedMode;
 //static float pHValue, ppmValue, voltage;
 double pHValue = 0;
 double voltage = 1;
@@ -127,6 +131,26 @@ void interpretString(){
       isPumpOn = false;
       //TODO JOSH: This will reset the off time, is this what you want? or to not change it?
       pumpOffTime = millis();
+    }else if(contains(newLine, "PI: LIGHTS: ON")){
+      digitalWrite(LIGHT_PIN, HIGH);
+      userDefinedMode = true;
+      //TODO JOSH: Once we use the CLOCK feature from the PI, 
+      //we can use a boolean to determine if the preprogrammed schedule is 
+      //being overridden by the user, and we can reset the schedule with a button press.
+    }else if(contains(newLine, "PI: LIGHTS: OFF")){
+      digitalWrite(LIGHT_PIN, LOW);
+      userDefinedMode = true;
+    }else if(contains(newLine, "PI: EC PUMP: ON")){
+      //TODO JOSH: ADD METHOD TO TURN PUMP ON FOR A COUPLE SECONDS.
+      analogWrite(EC_PUMP_PIN, HIGH);
+      userDefinedMode = true;
+    }else if(contains(newLine, "PI: PH PUMP: ON")){
+      //TODO JOSH: ADD METHOD TO TURN PUMP ON FOR A COUPLE SECONDS.
+      analogWrite(PH_PUMP_PIN, HIGH);
+      userDefinedMode = true;
+    }else if(contains(newLine, "PI: RESET CYCLE")){
+      //TODO JOSH: THIS IS DONE ONCE CLOCK IS IMPLEMENTED. 
+      //TODO JOSH: NEED METHOD TO RESET TO PRE-DEFINED CYCLE
     }
   }
   newLine = "";
