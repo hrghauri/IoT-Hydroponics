@@ -8,13 +8,14 @@
 #define PH_PUMP_PIN 5
 #define PUMP_PIN 7
 #define LIGHT_PIN 8
+#define MAX_OVERRIDE_TIME 300000 //ms = 5 minutes
 #define PUMP_ON_TIME 30000 //ms
 #define PUMP_OFF_TIME 86400000 //ms
 #define UPDATE_CLOCK 10000 //ms
 #define READ_SERIAL 1000 //ms
 #define OFFSET 0.00 //deviation compensate
 #define SAMPLE_INTERVAL 20 //ms
-#define PRINT_INTERVAL 800 //ms
+#define PRINT_INTERVAL 20000 //ms
 #define ARRAY_LENGTH 40
 int phArray[ARRAY_LENGTH];
 int ecArray[ARRAY_LENGTH];
@@ -26,7 +27,9 @@ static unsigned long pumpOnTime;
 static unsigned long pumpOffTime;
 static unsigned long serialReadTime;
 static unsigned long updateClockTime;
+static unsigned long overrideTime;
 static bool userDefinedMode;
+static time_t currentTime;
 //static float pHValue, ppmValue, voltage;
 double pHValue = 0;
 double voltage = 1;
@@ -35,15 +38,20 @@ double ppmValue = 0;
 unsigned long ecValueTotal = 0;
 double ecAverage = 0;
 
+boolean isECPumpOn = false;
+boolean isPHPumpOn = false;
 boolean isPumpOn = false;
 boolean isLightOn = false;
 boolean startedPump = false;
+//Used to determine if we should follow the schedule or not.
+boolean overrideSchedule = false;
 
-String newLine = "";
+String serialString = "";
 
 void setup() {
   Serial.begin(9600);
   pinMode(PUMP_PIN, OUTPUT);
+  pinMode(LIGHT_PIN, OUTPUT);
   samplingTime = millis();
   printTime = millis();
   serialReadTime = millis();
@@ -53,7 +61,7 @@ void setup() {
   //Start with pump on????
   digitalWrite(PUMP_PIN, HIGH); //todo josh: high is off for testing...
   pumpOnTime = millis();
-  isPumpOn = true;
+  isPumpOn = false;
 
   //Start with lights on
   digitalWrite(LIGHT_PIN, LOW); //Low should start it as on
@@ -61,71 +69,72 @@ void setup() {
   
 }
 
-void getTimeFromSerial(){
-  if(newLine.length()>0){
-    clearInputBuffer();
-    Serial.println(newLine);
-    if(contains(newLine, "PI: TIME: ")){
-      Serial.println("Contains PI: TIME: ");
-      String msTime = newLine.substring(10);
-      int msTimeInt = msTime.toInt();
-      setTime(msTimeInt);
-      Serial.print("From arduino: ");
-      Serial.print(msTime);
-    }
-  }
-  
-}
-
 void loop() {
-//  if (millis() - updateClockTime > UPDATE_CLOCK){
-//    Serial.println("Inside Clock Loop");
-//    clearInputBuffer();
-//    if (Serial.available()){
-//      while(Serial.available() > 0){
-//        char c = Serial.read();
-//        if (c == '\n'){
-//          break;
-//        }
-//        newLine += c;
-//      }
-//      getTimeFromSerial();
-//    }
-//   updateClockTime = millis();
-//  }
-
+  //Read values from serial port for commands and time update.
   if (millis() - serialReadTime > READ_SERIAL){
-    Serial.println("In Serial Read Loop");
-    clearInputBuffer();
+    //Serial.println("In Serial Read Loop");
+    //clearInputBuffer();
     if (Serial.available()){
       while( Serial.available() > 0){
-        char c = Serial.read();
-        if (c == '\n'){
-          break;
-        }
-        newLine += c;  
+        serialString = Serial.readString();
+        //check string to match "PI: *"
+        interpretString(serialString);
       }
-      //check string to match "PI: *"
-      interpretString();
     }
     serialReadTime = millis();
   }
+
+  //Get samples often for accurate measurements.
+  if (millis() - samplingTime > SAMPLE_INTERVAL){
+    getReadingPH();
+    getReadingEC();
+
+    samplingTime = millis();
+  }
+
+  //Send reading data over serial port.
+  if (millis() - printTime > PRINT_INTERVAL){
+    Serial.print("ARDUINO: PH VALUE: ");
+    Serial.println(pHValue);
+    Serial.print("ARDUINO: PPM VALUE: ");
+    Serial.println(ppmValue);
+    printTime = millis();
+  }
+
+  //This is our safety measure to kill the pump after max PUMP_ON_TIME.
+  if (isPumpOn && (millis() - pumpOnTime > PUMP_ON_TIME)){
+    turnOffPump();
+  }
+
+  if (millis() - overrideTime > MAX_OVERRIDE_TIME){
+    overrideSchedule = false;
+  }
   
-  // Logic for the timing of lights and tank pump.
-  if( hour() < 17 && hour() > 1){
-    //Have the lights on for these 16 hours
-    digitalWrite(LIGHT_PIN, LOW);
-  }else{
-    //have lights off for these 8 hours
-    digitalWrite(PUMP_PIN, HIGH);
+  //If the user overrides the schedule, ignore these checks
+  if(!overrideSchedule){
+    // Logic for the timing of lights and tank pump.
+    if(hour() > 1 && hour() < 17){
+      //Have the lights on for these 16 hours
+      turnOnLights(false);
+    }else{
+      //have lights off for these 8 hours
+      turnOffLights(false);
+    }
   }
 
   if(hour()==1 && !startedPump){
     //at 1am turn the pump on for 30 seconds
+    if(!isPumpOn){
+      turnOnPump();
+    }
+    //Set timer to back to zero.
+    pumpOnTime = millis();
     startedPump = true;
   }
   
   if(hour()==2 && startedPump){
+    //Reset the daily pump scheudle.
+    startedPump = false;
     
   }
 
@@ -137,60 +146,106 @@ void clearInputBuffer(){
   Serial.read();
 }
 
-void interpretString(){
-  if(newLine.length() > 0){
-    clearInputBuffer();
-    Serial.println(newLine);
-    if(contains(newLine, "PI: TIME:")){
-      Serial.println("contains PI: TIME:");
-      String msTime = newLine.substring(10);
-      int msTimeInt = msTime.toInt();
-      setTime(msTimeInt);
-      Serial.print("From arduino: ");
-      Serial.print(msTime);
-    }else if(contains(newLine, "PI: PUMP: ON")){
+void interpretString(String currentString){
+  if(currentString.length() > 0){
+   //clearInputBuffer();
+    Serial.println("length > 0");
+    if(currentString.startsWith("PI: TIME: ")){
+      Serial.println("starts w PI: TIME: ");
+      String hms = currentString.substring(10);
+      //int msTimeInt = msTime.toInt();
+      int h = hms.substring(0,2).toInt();
+      int m = hms.substring(2,4).toInt();
+      int s = hms.substring(4,6).toInt();
+      setTime(h,m,s,0,0,0);
+      //todo Josh: remove these serial prints when confirmed it is working.
+      Serial.print("Current Arduino Time: ");
+      Serial.print(hour());
+      Serial.print(":");
+      Serial.println(minute());
+      
+    }else if(contains(currentString, "PI: PUMP: ON")){
       Serial.println("contains PI: PUMP: ON");
-      digitalWrite(PUMP_PIN, LOW);
+      turnOnPump();
+      //Now we depend on the loops millis check to shut off the pump!
       pumpOnTime = millis();
-      isPumpOn = true;
-      //if(contains(newLine, "PUMP: ON")){
-        //Serial.println("contains PUMP ON");
-        //digitalWrite(PUMP_PIN, LOW);
-        //pumpOnTime = millis();
-        //isPumpOn = true;
-      //}
-    }else if(contains(newLine, "PI: PUMP: OFF")){
+    }else if(contains(currentString, "PI: PUMP: OFF")){
       Serial.println("contains PI: PUMP: OFF");
-      digitalWrite(PUMP_PIN, HIGH);
-      isPumpOn = false;
-      //TODO JOSH: This will reset the off time, is this what you want? or to not change it?
-      pumpOffTime = millis();
-    }else if(contains(newLine, "PI: LIGHTS: ON")){
-      digitalWrite(LIGHT_PIN, HIGH);
-      userDefinedMode = true;
-      //TODO JOSH: Once we use the CLOCK feature from the PI, 
-      //we can use a boolean to determine if the preprogrammed schedule is 
-      //being overridden by the user, and we can reset the schedule with a button press.
-    }else if(contains(newLine, "PI: LIGHTS: OFF")){
-      digitalWrite(LIGHT_PIN, LOW);
-      userDefinedMode = true;
-    }else if(contains(newLine, "PI: EC PUMP: ON")){
-      //TODO JOSH: ADD METHOD TO TURN PUMP ON FOR A COUPLE SECONDS.
-      analogWrite(EC_PUMP_PIN, HIGH);
-      userDefinedMode = true;
-    }else if(contains(newLine, "PI: PH PUMP: ON")){
-      //TODO JOSH: ADD METHOD TO TURN PUMP ON FOR A COUPLE SECONDS.
-      analogWrite(PH_PUMP_PIN, HIGH);
-      userDefinedMode = true;
-    }else if(contains(newLine, "PI: RESET CYCLE")){
-      //TODO JOSH: THIS IS DONE ONCE CLOCK IS IMPLEMENTED. 
-      //TODO JOSH: NEED METHOD TO RESET TO PRE-DEFINED CYCLE
+      turnOffPump(); 
+    }else if(contains(currentString, "PI: LIGHTS: ON")){
+      Serial.println("contains PI: LIGHTS: ON");
+      turnOnLights(true);
+    }else if(contains(currentString, "PI: LIGHTS: OFF")){
+      Serial.println("contains PI: LIGHTS: OFF");
+      turnOffLights(true);
+    }else if(contains(currentString, "PI: ECPUMP: ON")){
+      Serial.println("contains PI: ECPUMP: ON");
+      turnOnECPump();
+    }else if(contains(currentString, "PI: ECPUMP: OFF")){
+      Serial.println("contains PI: ECPUMP: OFF");
+      turnOffECPump();
+    }else if(contains(currentString, "PI: PHPUMP: ON")){
+      Serial.println("contains PI: PHPUMP: ON");
+      turnOnPHPump();
+    }else if(contains(currentString, "PI: PHPUMP: OFF")){
+      Serial.println("contains PI: PHPUMP: OFF");
+      turnOffPHPump();
     }
   }
-  newLine = "";
+}
+
+//This will turn the tank pump on for 30 seconds MAX.
+//todo future josh: MAYBE WAIT x HOURS BEFORE ALLOWING IT TO TURN ON AGAIN
+void turnOnPump(){
+  digitalWrite(PUMP_PIN, LOW);
+  isPumpOn = true;
+  pumpOnTime = millis();
+}
+
+void turnOffPump(){
+  digitalWrite(PUMP_PIN, HIGH);
+  isPumpOn = false;
+}
+
+void turnOnLights(bool userOverride){
+  setOverrideSchedule(userOverride);
+  digitalWrite(LIGHT_PIN, LOW);
+  isLightOn = true;
+}
+
+void turnOffLights(bool userOverride){
+  setOverrideSchedule(userOverride);
+  digitalWrite(LIGHT_PIN, HIGH);
+  isLightOn = false;
+}
+
+void turnOnECPump(){
+  analogWrite(EC_PUMP_PIN, 255);
+  isECPumpOn = true;
+}
+
+void turnOffECPump(){
+  analogWrite(EC_PUMP_PIN, 0);
+  isECPumpOn = false;
+}
+
+void turnOnPHPump(){
+  analogWrite(PH_PUMP_PIN, 255);
+  isPHPumpOn = true;
+}
+
+void turnOffPHPump(){
+  analogWrite(PH_PUMP_PIN, 0);
+  isPHPumpOn = false;
+}
+
+void setOverrideSchedule(bool userOverride){
+  overrideSchedule = userOverride;
+  overrideTime = millis();
 }
   
-
+//This is exact patern matching from i to end of String always.
+//Use startsWith to check front of string.
 bool contains(String s, String search) {
     int max = s.length() - search.length();
 
@@ -199,6 +254,22 @@ bool contains(String s, String search) {
     }
 
     return false; //or -1
+}
+
+void getTimeFromSerial(String newLine){
+  if(newLine.length()>0){
+    clearInputBuffer();
+    Serial.println(newLine);
+    if(contains(newLine, "PI: TIME: ")){
+      Serial.println("Contains PI: TIME: ");
+      String msTime = newLine.substring(10);
+      int msTimeInt = msTime.toInt();
+      //currentTime.setTime(msTimeInt);
+      Serial.print("From arduino: ");
+      Serial.print(msTime);
+    }
+  }
+  
 }
 
 void getReadingPH(){
