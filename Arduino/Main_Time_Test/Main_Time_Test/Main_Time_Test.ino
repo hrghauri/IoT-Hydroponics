@@ -72,8 +72,6 @@ void setup() {
 void loop() {
   //Read values from serial port for commands and time update.
   if (millis() - serialReadTime > READ_SERIAL){
-    //Serial.println("In Serial Read Loop");
-    //clearInputBuffer();
     if (Serial.available()){
       while( Serial.available() > 0){
         serialString = Serial.readString();
@@ -149,46 +147,30 @@ void clearInputBuffer(){
 void interpretString(String currentString){
   if(currentString.length() > 0){
    //clearInputBuffer();
-    Serial.println("length > 0");
     if(currentString.startsWith("PI: TIME: ")){
-      Serial.println("starts w PI: TIME: ");
       String hms = currentString.substring(10);
       //int msTimeInt = msTime.toInt();
       int h = hms.substring(0,2).toInt();
       int m = hms.substring(2,4).toInt();
       int s = hms.substring(4,6).toInt();
-      setTime(h,m,s,0,0,0);
-      //todo Josh: remove these serial prints when confirmed it is working.
-      Serial.print("Current Arduino Time: ");
-      Serial.print(hour());
-      Serial.print(":");
-      Serial.println(minute());
-      
+      setTime(h,m,s,0,0,0);      
     }else if(contains(currentString, "PI: PUMP: ON")){
-      Serial.println("contains PI: PUMP: ON");
       turnOnPump();
       //Now we depend on the loops millis check to shut off the pump!
       pumpOnTime = millis();
     }else if(contains(currentString, "PI: PUMP: OFF")){
-      Serial.println("contains PI: PUMP: OFF");
       turnOffPump(); 
     }else if(contains(currentString, "PI: LIGHTS: ON")){
-      Serial.println("contains PI: LIGHTS: ON");
       turnOnLights(true);
     }else if(contains(currentString, "PI: LIGHTS: OFF")){
-      Serial.println("contains PI: LIGHTS: OFF");
       turnOffLights(true);
     }else if(contains(currentString, "PI: ECPUMP: ON")){
-      Serial.println("contains PI: ECPUMP: ON");
       turnOnECPump();
     }else if(contains(currentString, "PI: ECPUMP: OFF")){
-      Serial.println("contains PI: ECPUMP: OFF");
       turnOffECPump();
     }else if(contains(currentString, "PI: PHPUMP: ON")){
-      Serial.println("contains PI: PHPUMP: ON");
       turnOnPHPump();
     }else if(contains(currentString, "PI: PHPUMP: OFF")){
-      Serial.println("contains PI: PHPUMP: OFF");
       turnOffPHPump();
     }
   }
@@ -259,14 +241,10 @@ bool contains(String s, String search) {
 void getTimeFromSerial(String newLine){
   if(newLine.length()>0){
     clearInputBuffer();
-    Serial.println(newLine);
     if(contains(newLine, "PI: TIME: ")){
-      Serial.println("Contains PI: TIME: ");
       String msTime = newLine.substring(10);
       int msTimeInt = msTime.toInt();
       //currentTime.setTime(msTimeInt);
-      Serial.print("From arduino: ");
-      Serial.print(msTime);
     }
   }
   
@@ -309,7 +287,6 @@ double averagearray(int* arr, int number) {
   double avg;
   long amount = 0;
   if (number <= 0) {
-    Serial.println("Error number for the array to avraging!/n");
     return 0;
   }
   if (number < 5) { //less than 5, calculated directly statistics
