@@ -1,0 +1,2 @@
+b'ARDUINO: PH VALUE: 1956.59\r\n'
+b'ARDUINO: PPM VALUE: 0.00\r\n'
