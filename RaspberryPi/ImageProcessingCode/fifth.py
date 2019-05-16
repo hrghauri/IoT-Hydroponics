@@ -81,7 +81,7 @@ cv2.waitKey(0)
 blank_image = np.zeros((small.shape[0], small.shape[1], 3))
 
 
-_, contours, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+contours, _ = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 cv2.drawContours(blank_image, contours, -1, (0,0,255),2)
 cv2.imshow('Canny Edges After Contouring', blank_image)
 cv2.waitKey()
